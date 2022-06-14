@@ -5,10 +5,7 @@ import time
 from joint_sampler import joint_sampler
 from gibbs_sampler import gibbs_sampler
 
-from tqdm import tqdm
-
-def get_D_l(c_l):
-        return [c_l[l] * l * (l+1) for l in range(len(c_l))]            
+from tqdm import tqdm   
 
 samples = 100
 l_min = 2
@@ -24,7 +21,7 @@ a.start_gibbs_sampler(samples=samples, burnin = 10, start_q = 1)
 end = time.time()
 tot = end-start
 print('{} seconds doing {} samples, which gives {} samples/second'.format(tot, samples, samples/tot ))
-
+'''
 b = joint_sampler(fwhm_multiplier = fwhm, noise_multiplier = noise, l_min = l_min, l_max = l_max, q_sigma = q_sigma)
 b.plot_spectras()
 
@@ -34,5 +31,5 @@ end = time.time()
 tot = end-start
 print('{} seconds doing {} samples, which gives {} samples/second'.format(tot, samples, samples/tot ))
 
-plt.show()
+plt.show()'''
 

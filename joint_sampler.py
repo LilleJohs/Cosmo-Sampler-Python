@@ -7,6 +7,9 @@ import time
 
 from tqdm import tqdm
 
+def get_D_l(c_l):
+        return [c_l[l] * l * (l+1) for l in range(len(c_l))]
+
 class joint_sampler:
     def __init__(self, fwhm_multiplier, noise_multiplier, l_max=350, l_min=20, q_sigma = 0.05):
         self.q_sigma = q_sigma
