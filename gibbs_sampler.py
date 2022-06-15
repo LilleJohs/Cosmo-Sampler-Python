@@ -180,10 +180,12 @@ class gibbs_sampler():
             plt.figure()
             plt.hist(list_q)
             plt.xlabel(r"$q$")
+            plt.savefig('q_hist.pdf')
             plt.figure()
             plt.plot(np.arange(len(list_q)), list_q)
             plt.xlabel('Iteration')
             plt.ylabel('q')
+            plt.savefig('q_it.pdf')
         else:
             plt.figure()
             plt.plot(np.arange(samples+1), list_of_c_l[:, 10] / c_l_average[10])
