@@ -4,6 +4,7 @@ from numpy import pi, sqrt
 import camb
 import healpy as hp
 import time
+from tools import *
 
 from tqdm import tqdm
 
@@ -100,37 +101,7 @@ class joint_sampler:
 
         return new_q, c_l
 
-    def acceptance(self, old_s_lm, proposed_s_lm, old_f_lm, proposed_f_lm, old_c_l, proposed_c_l):
-        l_max = self.l_max
-        B_l = self.b_l
-        N_l = self.N_l
-        d_lm = self.d_lm
-
-        ln_pi_ip1 = 0
-        ln_pi_i = 0
-        for l in range(self.l_min, l_max+1):
-            index = hp.sphtfunc.Alm.getidx(l_max, l, np.arange(l+1))
-            
-            ln_pi_ip1 += sum(np.abs(d_lm[index] - B_l[l] * proposed_s_lm[index])**2 / N_l)
-            ln_pi_i += sum(np.abs(d_lm[index] - B_l[l] * old_s_lm[index])**2 / N_l)
-            #print(1,sum((d_lm[index] - B_l[l] * proposed_s_lm[index])**2 / N_l) - sum((d_lm[index] - B_l[l] * old_s_lm[index])**2 / N_l) )
-
-            ln_pi_ip1 += sum(np.abs(proposed_s_lm[index])**2 / proposed_c_l[l])
-            ln_pi_i += sum(np.abs(old_s_lm[index])**2 / old_c_l[l])
-            #print(2, sum(proposed_s_lm[index]**2 / proposed_c_l[l]) - sum(old_s_lm[index]**2 / old_c_l[l]))
-
-            ln_pi_ip1 += sum(np.abs(proposed_f_lm[index]) ** 2 * B_l[l] ** 2 / N_l)
-            ln_pi_i += sum(np.abs(old_f_lm[index]) ** 2 * B_l[l]** 2 / N_l)
-            
-            #print(3, sum(proposed_f_lm[index] ** 2 * B_l[l] ** 2 / N_l) - sum(old_f_lm[index] ** 2 * B_l[l]** 2 / N_l))
-
-        A = np.real(np.exp(-1/2 * (ln_pi_ip1 - ln_pi_i)))
-        eta = np.random.uniform(0, 1)
-        print('A:', A, 'Eta:', eta)
-        
-        return eta < A
-
-    def start_joint_sampler(self, samples=100, burnin=10, start_q=1):
+    def start_joint_sampler(self, samples=100, burnin=10, start_q=3):
         # Sample only ns for now
         l_min = self.l_min
         l_max = self.l_max
@@ -149,31 +120,31 @@ class joint_sampler:
         pbar = tqdm(total=samples)
         while j <= samples:
             proposed_q, proposed_c_l = self.proposal_w(old_q)
-            proposed_s_lm, _ = self.get_joint_slm_sample(proposed_c_l)
-            # Scale f_lm: f_lm^(i+1) = sqrt(c^(i+1)_l / c^i_l) f_lm^i
-            scaled_f_lm = np.zeros(self.alm_size, dtype=complex)
-            for l in range(l_min, l_max+1):
-                pre_factor = sqrt(proposed_c_l[l] / old_c_l[l])
-                index = hp.sphtfunc.Alm.getidx(l_max, l, np.arange(l+1))
-                scaled_f_lm[index] = pre_factor * old_f_lm[index]
-            accepted = self.acceptance(old_s_lm, proposed_s_lm, old_f_lm, scaled_f_lm, old_c_l, proposed_c_l)
+            proposed_s_lm, new_f_lm = self.get_joint_slm_sample(proposed_c_l)
+
+            # Scaled f_lm is used in the acceptance (not new_f_lm above)
+            # But if the sample is accepted, then old_f_lm = new_f_lm! (not old_f_lm = scaled_f_lm)
+            # This is all vvv confusing
+            scaled_f_lm = get_scaled_flm(l_min, l_max, proposed_c_l, old_c_l, self.alm_size, old_f_lm)
+            accepted = acceptance(old_s_lm, proposed_s_lm, old_f_lm, scaled_f_lm, old_c_l, proposed_c_l, l_min, l_max, self.b_l, self.N_l, self.d_lm)
+
             tot += 1
             if accepted:
                 #if j%(samples/10) == 0: print('Progress: {}%'.format(j/samples*100))
                 old_c_l = proposed_c_l
                 old_q = proposed_q
                 old_s_lm = proposed_s_lm
-                old_f_lm = scaled_f_lm
+                old_f_lm = new_f_lm
                 accept_rate += 1
                 
-            list_of_q[j] = proposed_q
-            print('Avg q:', np.mean(list_of_q[:j+1]), 'Std q:', np.std(list_of_q[:j+1]))
+            list_of_q[j] = old_q
+            print('Avg q:', np.mean(list_of_q[:j+1]), 'Std q:', np.std(list_of_q[:j+1]), 'Accept rate:', accept_rate/tot)
             j += 1
             pbar.update(1)
         print('Accept rate:', accept_rate/tot)
         print('Avg q:', np.mean(list_of_q[burnin:]), 'Std q:', np.std(list_of_q[burnin:]))
         plt.figure()
-        plt.hist(list_of_q[burnin:])
+        plt.hist(list_of_q[burnin:], bins = 30)
         l = np.arange(l_min, l_max+1)
         plt.savefig('q_hist.pdf')
         plt.figure()
