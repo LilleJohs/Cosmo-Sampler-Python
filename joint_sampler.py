@@ -8,24 +8,24 @@ import time
 from tqdm import tqdm
 
 def get_D_l(c_l):
-        return [c_l[l] * l * (l+1) for l in range(len(c_l))]
+        return [c_l[l] * l * (l+1)/(2*np.pi) for l in range(len(c_l))]
 
 class joint_sampler:
-    def __init__(self, fwhm_multiplier, noise_multiplier, l_max=350, l_min=20, q_sigma = 0.05):
+    def __init__(self, fwhm_deg, noise_muK, l_max=350, l_min=20, q_sigma = 0.05):
         self.q_sigma = q_sigma
-        self.Nside = 128
+        self.Nside = 256
         self.l_max = l_max
         self.l_min = l_min
-        self.Npix = 12 * self.Nside * 3
-        self.fwhm = fwhm_multiplier * 3 * 60/self.Nside * pi / 180
+        self.fwhm = fwhm_deg * pi / 180
+        self.fwhm_deg = fwhm_deg
         print('FWHM:', self.fwhm, 'radians')
         self.alm_size = int((self.l_max+1)*(self.l_max + 2)/2)
         self.b_l = hp.sphtfunc.gauss_beam(self.fwhm, lmax=self.l_max)
-        cp = camb.set_params(tau=0.0544, ns=0.9649, H0=67.36, ombh2=0.02237,omch2=0.12, As=2.1e-09, lmax=1000)
+        cp = camb.set_params(tau=0.0544, ns=0.9649, H0=67.36, ombh2=0.02237,omch2=0.12, As=2.1e-09, lmax=self.l_max)
         camb_results = camb.get_results(cp)
-        self.c_l_lcdm = np.array(camb_results.get_cmb_power_spectra(lmax=self.l_max, raw_cl=True)['total'][:, 0])
+        self.c_l_lcdm = np.array(camb_results.get_cmb_power_spectra(lmax=self.l_max, raw_cl=True, CMB_unit='muK')['total'][:, 0])
 
-        self.N_l = noise_multiplier * np.array(camb_results.get_cmb_power_spectra(lmax=250, raw_cl=True)['total'][250, 0])# * self.b_l[self.l_max]**2
+        self.N_l = noise_muK
         self.init_CMB_noise()
 
     def init_CMB_noise(self):
@@ -35,11 +35,12 @@ class joint_sampler:
         c_l_lcdm = self.c_l_lcdm
         l_max = self.l_max
 
+        a_lm = hp.synalm(c_l_lcdm, lmax=self.l_max)
+        N_lm = hp.synalm(np.ones(len(c_l_lcdm)) * N_l, lmax=self.l_max)
         for l in range(2, l_max+1):
             for m in range(l+1):
                 index = hp.sphtfunc.Alm.getidx(l_max, l, m)
-                a_lm[index] = np.random.normal(0, 1) * sqrt(c_l_lcdm[l] * self.b_l[l]**2)
-                d_lm[index] = a_lm[index] + np.random.normal(0, 1) * sqrt(N_l)
+                d_lm[index] = a_lm[index]*self.b_l[l] + N_lm[index]
 
         self.d_lm = d_lm
         self.a_lm = a_lm
@@ -53,12 +54,13 @@ class joint_sampler:
         D_N_l = get_D_l(np.repeat(self.N_l, self.l_max+1))
 
         plt.figure()
+        plt.title(r'Beam={} deg Noise={} muK^2'.format(self.fwhm_deg, self.N_l))
         plt.plot(l, c_l[self.l_min:], label='LCDM', linewidth=4)
-        plt.plot(l, a_l[self.l_min:], label='Beam Smoothed Cosmological Signal')
+        plt.plot(l, a_l[self.l_min:], label='Cosmological Signal')
         plt.plot(l, d_l[self.l_min:], label='Measured Data')
         plt.plot(l, D_N_l[self.l_min:], label='White Noise')
         
-        plt.ylabel(r"$C_{\ell}\ell (\ell + 1)$")
+        plt.ylabel(r"$C_{\ell}\ell (\ell + 1)/2\pi$")
         plt.xlabel(r"$\ell$")
         plt.legend()
         plt.savefig('spectra.pdf')
@@ -109,16 +111,17 @@ class joint_sampler:
         for l in range(self.l_min, l_max+1):
             index = hp.sphtfunc.Alm.getidx(l_max, l, np.arange(l+1))
             
-            ln_pi_ip1 += sum((d_lm[index] - B_l[l] * proposed_s_lm[index])**2 / N_l)
-            ln_pi_i += sum((d_lm[index] - B_l[l] * old_s_lm[index])**2 / N_l)
+            ln_pi_ip1 += sum(np.abs(d_lm[index] - B_l[l] * proposed_s_lm[index])**2 / N_l)
+            ln_pi_i += sum(np.abs(d_lm[index] - B_l[l] * old_s_lm[index])**2 / N_l)
             #print(1,sum((d_lm[index] - B_l[l] * proposed_s_lm[index])**2 / N_l) - sum((d_lm[index] - B_l[l] * old_s_lm[index])**2 / N_l) )
 
-            ln_pi_ip1 += sum(proposed_s_lm[index]**2 / proposed_c_l[l])
-            ln_pi_i += sum(old_s_lm[index]**2 / old_c_l[l])
+            ln_pi_ip1 += sum(np.abs(proposed_s_lm[index])**2 / proposed_c_l[l])
+            ln_pi_i += sum(np.abs(old_s_lm[index])**2 / old_c_l[l])
             #print(2, sum(proposed_s_lm[index]**2 / proposed_c_l[l]) - sum(old_s_lm[index]**2 / old_c_l[l]))
 
-            ln_pi_ip1 += sum(proposed_f_lm[index] ** 2 * B_l[l] ** 2 / N_l)
-            ln_pi_i += sum(old_f_lm[index] ** 2 * B_l[l]** 2 / N_l)
+            ln_pi_ip1 += sum(np.abs(proposed_f_lm[index]) ** 2 * B_l[l] ** 2 / N_l)
+            ln_pi_i += sum(np.abs(old_f_lm[index]) ** 2 * B_l[l]** 2 / N_l)
+            
             #print(3, sum(proposed_f_lm[index] ** 2 * B_l[l] ** 2 / N_l) - sum(old_f_lm[index] ** 2 * B_l[l]** 2 / N_l))
 
         A = np.real(np.exp(-1/2 * (ln_pi_ip1 - ln_pi_i)))
@@ -163,13 +166,14 @@ class joint_sampler:
                 old_f_lm = scaled_f_lm
                 accept_rate += 1
                 
-                list_of_q[j] = old_q
-                j += 1
-                pbar.update(1)
+            list_of_q[j] = proposed_q
+            print('Avg q:', np.mean(list_of_q[:j+1]), 'Std q:', np.std(list_of_q[:j+1]))
+            j += 1
+            pbar.update(1)
         print('Accept rate:', accept_rate/tot)
         print('Avg q:', np.mean(list_of_q[burnin:]), 'Std q:', np.std(list_of_q[burnin:]))
         plt.figure()
-        plt.hist(list_of_q)
+        plt.hist(list_of_q[burnin:])
         l = np.arange(l_min, l_max+1)
         plt.savefig('q_hist.pdf')
         plt.figure()
